@@ -11,3 +11,10 @@ npm-debug.log*
 .turbo/
 .next/
 out/
+
+# Playwright run output. The report and traces are uploaded as CI
+# artifacts, so they never need to be in the repository.
+playwright-report/
+test-results/
+blob-report/
+.playwright/
