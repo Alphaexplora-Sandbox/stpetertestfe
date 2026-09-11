@@ -2,10 +2,12 @@
   "name": "stpetertestfe",
   "version": "0.1.0",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
+    "build": "tsc --noEmit -p tsconfig.build.json && vite build",
+    "dev": "vite",
+    "preview": "vite preview --port 4173 --strictPort",
+    "start": "vite preview --port 4173 --strictPort",
     "test": "jest",
+    "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests"
   },
@@ -23,6 +25,10 @@
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "ts-node": "^10.9.2"
-  }
+    "ts-node": "^10.9.2",
+    "vite": "^6.0.7",
+    "@vitejs/plugin-react": "^4.3.4",
+    "@playwright/test": "^1.49.1"
+  },
+  "private": true
 }
