@@ -59,16 +59,76 @@ jobs:
       system-dir: stpetertestfe
       app-type: web
       require-approval: false
+  # GitHub forbids the `secrets` context inside a reusable workflow call's
+  # `with:` block, and rejects the WHOLE FILE when it finds one. That is not a
+  # failed job, it is a failed PARSE: a 0-second run with no jobs, listed by
+  # filename because the workflow name could not be read either.
+  #
+  # The alias is read from `vars`, which IS allowed in `with:`. It belongs
+  # there on its own merit - a Vercel alias is a public hostname, not a
+  # credential - and a secret could not be used here in any case: GitHub
+  # redacts job outputs containing a secret, so routing one through an output
+  # would arrive empty at the other end.
+  #
+  # The guard is the other half. An unset alias built a URL of "https://",
+  # which fails in a way that looks like the deployment is down rather than
+  # like configuration that was never added.
+  resolve-targets:
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    outputs:
+      dev-alias: ${{ steps.resolve.outputs.dev-alias }}
+      uat-alias: ${{ steps.resolve.outputs.uat-alias }}
+    steps:
+      - name: Resolve deployment targets
+        id: resolve
+        env:
+          BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+          VERCEL_ALIAS_DEV: ${{ vars.VERCEL_ALIAS_DEV }}
+          VERCEL_ALIAS_UAT: ${{ vars.VERCEL_ALIAS_UAT }}
+        run: |-
+          set -euo pipefail
+
+          {
+            echo "dev-alias=${VERCEL_ALIAS_DEV}"
+            echo "uat-alias=${VERCEL_ALIAS_UAT}"
+          } >> "$GITHUB_OUTPUT"
+
+          # Only the variable this branch actually needs is required.
+          case "${BRANCH}" in
+            dev)
+              required="${VERCEL_ALIAS_DEV}"
+              name="VERCEL_ALIAS_DEV"
+              ;;
+            uat)
+              required="${VERCEL_ALIAS_UAT}"
+              name="VERCEL_ALIAS_UAT"
+              ;;
+            *)
+              echo "Branch ${BRANCH} has no deployment target to resolve."
+              exit 0
+              ;;
+          esac
+
+          if [ -z "${required}" ]; then
+            echo "::error::Repository variable ${name} is not set, so the ${BRANCH} deployment has no address. Add it under Settings > Secrets and variables > Actions > Variables. It is a variable rather than a secret because it is a public hostname, and because GitHub redacts secrets passed between jobs."
+            exit 1
+          fi
+
+          echo "Branch ${BRANCH} resolves to ${required}"
+
   deploy-vercel-frontend-dev:
     needs:
       - build
+      - resolve-targets
     if: ${{ (github.event.workflow_run.head_branch || github.ref_name) == 'dev' }}
     uses: Alpha-Explora/alphaci-workflow/.github/workflows/vercel-deploy.yml@v1
     with:
       system-name: stpetertestfe
       working-directory: .
       environment: preview
-      branch-alias: ${{ secrets.VERCEL_ALIAS_DEV }}
+      branch-alias: ${{ needs.resolve-targets.outputs.dev-alias }}
       checkout-ref: ${{ github.event.workflow_run.head_sha || github.sha }}
     secrets:
       VERCEL_TOKEN: ${{ secrets.VERCEL_FRONTEND_TOKEN }}
@@ -78,13 +138,14 @@ jobs:
   deploy-vercel-frontend-uat:
     needs:
       - build
+      - resolve-targets
     if: ${{ (github.event.workflow_run.head_branch || github.ref_name) == 'uat' }}
     uses: Alpha-Explora/alphaci-workflow/.github/workflows/vercel-deploy.yml@v1
     with:
       system-name: stpetertestfe
       working-directory: .
       environment: preview
-      branch-alias: ${{ secrets.VERCEL_ALIAS_UAT }}
+      branch-alias: ${{ needs.resolve-targets.outputs.uat-alias }}
       checkout-ref: ${{ github.event.workflow_run.head_sha || github.sha }}
     secrets:
       VERCEL_TOKEN: ${{ secrets.VERCEL_FRONTEND_TOKEN }}
@@ -143,6 +204,7 @@ jobs:
     needs:
       - validate-access
       - build
+      - resolve-targets
       - deploy-vercel-frontend-dev
       - deploy-vercel-frontend-uat
       - deploy-vercel-frontend-main

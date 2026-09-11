@@ -31,27 +31,88 @@ jobs:
             exit 1
           fi
           echo "ALPHACI authorization validated."
+  # GitHub forbids the `secrets` context inside a reusable workflow call's
+  # `with:` block, and rejects the WHOLE FILE when it finds one. That is not a
+  # failed job, it is a failed PARSE: a 0-second run with no jobs, listed by
+  # filename because the workflow name could not be read either.
+  #
+  # The alias is read from `vars`, which IS allowed in `with:`. It belongs
+  # there on its own merit - a Vercel alias is a public hostname, not a
+  # credential - and a secret could not be used here in any case: GitHub
+  # redacts job outputs containing a secret, so routing one through an output
+  # would arrive empty at the other end.
+  #
+  # The guard is the other half. An unset alias built a URL of "https://",
+  # which fails in a way that looks like the deployment is down rather than
+  # like configuration that was never added.
+  resolve-targets:
+    needs:
+      - validate-access
+    runs-on: ubuntu-latest
+    outputs:
+      uat-alias: ${{ steps.resolve.outputs.uat-alias }}
+      main-alias: ${{ steps.resolve.outputs.main-alias }}
+    steps:
+      - name: Resolve deployment targets
+        id: resolve
+        env:
+          BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+          VERCEL_ALIAS_UAT: ${{ vars.VERCEL_ALIAS_UAT }}
+          VERCEL_ALIAS_MAIN: ${{ vars.VERCEL_ALIAS_MAIN }}
+        run: |-
+          set -euo pipefail
+
+          {
+            echo "uat-alias=${VERCEL_ALIAS_UAT}"
+            echo "main-alias=${VERCEL_ALIAS_MAIN}"
+          } >> "$GITHUB_OUTPUT"
+
+          # Only the variable this branch actually needs is required.
+          case "${BRANCH}" in
+            uat)
+              required="${VERCEL_ALIAS_UAT}"
+              name="VERCEL_ALIAS_UAT"
+              ;;
+            main)
+              required="${VERCEL_ALIAS_MAIN}"
+              name="VERCEL_ALIAS_MAIN"
+              ;;
+            *)
+              echo "Branch ${BRANCH} runs no tests against a deployed environment."
+              exit 0
+              ;;
+          esac
+
+          if [ -z "${required}" ]; then
+            echo "::error::Repository variable ${name} is not set, so the ${BRANCH} deployment has no address and the UI was not tested. Add it under Settings > Secrets and variables > Actions > Variables. It is a variable rather than a secret because it is a public hostname, and because GitHub redacts secrets passed between jobs."
+            exit 1
+          fi
+
+          echo "Testing ${BRANCH} against https://${required}"
+
   ui-tests-uat:
     needs:
       - validate-access
+      - resolve-targets
     if: ${{ (github.event.workflow_run.head_branch || github.ref_name) == 'uat' }}
     uses: Alpha-Explora/alphaci-workflow/.github/workflows/playwright-e2e.yml@v1
     with:
       working-directory: .
       system-name: stpetertestfe
-      e2e-base-url: https://${{ secrets.VERCEL_ALIAS_UAT }}
+      e2e-base-url: https://${{ needs.resolve-targets.outputs.uat-alias }}
       e2e-tests-directory: tests/e2e
       browser-list: chromium
       upload-artifacts: true
   ui-tests-main:
     needs:
       - validate-access
+      - resolve-targets
     if: ${{ (github.event.workflow_run.head_branch || github.ref_name) == 'main' }}
     uses: Alpha-Explora/alphaci-workflow/.github/workflows/playwright-e2e.yml@v1
     with:
       working-directory: .
       system-name: stpetertestfe
-      e2e-base-url: https://${{ secrets.VERCEL_ALIAS_MAIN }}
+      e2e-base-url: https://${{ needs.resolve-targets.outputs.main-alias }}
       e2e-tests-directory: tests/e2e
       browser-list: chromium
       upload-artifacts: true
@@ -59,6 +120,7 @@ jobs:
     if: ${{ always() }}
     needs:
       - validate-access
+      - resolve-targets
       - ui-tests-uat
       - ui-tests-main
     runs-on: ubuntu-latest
@@ -81,7 +143,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           STAGE_FAILED: ${{ contains(needs.*.result, 'failure') }}
           STAGE_CANCELLED: ${{ contains(needs.*.result, 'cancelled') }}
-          STAGE_WORK_RAN: ${{ needs.ui-tests-uat.result != 'skipped' || needs.ui-tests-main.result != 'skipped' }}
+          STAGE_WORK_RAN: ${{ needs.resolve-targets.result != 'skipped' || needs.ui-tests-uat.result != 'skipped' || needs.ui-tests-main.result != 'skipped' }}
         run: |-
           # Derive stage conclusion from upstream needs results
           if [ "$STAGE_FAILED" = "true" ]; then
