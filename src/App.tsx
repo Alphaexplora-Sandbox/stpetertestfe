@@ -10,9 +10,21 @@ export interface AppProps {
    * only exists once there is something to show.
    */
   initialNotes?: readonly Note[];
+  /**
+   * Where new ids come from. Injected rather than called directly so a test can
+   * make them predictable, and so the component does not depend on
+   * crypto.randomUUID being present - it is not in every test environment, and
+   * discovering that through a thrown error inside an event handler is a poor
+   * way to learn it.
+   */
+  createId?: () => string;
 }
 
-export function App({ title = 'stpetertestfe', initialNotes = [] }: AppProps) {
+export function App({
+  title = 'stpetertestfe',
+  initialNotes = [],
+  createId = () => crypto.randomUUID(),
+}: AppProps) {
   const [notes, setNotes] = useState<readonly Note[]>(initialNotes);
   const [draftTitle, setDraftTitle] = useState('');
   const [draftBody, setDraftBody] = useState('');
@@ -30,7 +42,7 @@ export function App({ title = 'stpetertestfe', initialNotes = [] }: AppProps) {
     }
 
     setNotes((current) =>
-      addNote(current, { title: draftTitle, body: draftBody }, crypto.randomUUID(), new Date()),
+      addNote(current, { title: draftTitle, body: draftBody }, createId(), new Date()),
     );
     setDraftTitle('');
     setDraftBody('');
