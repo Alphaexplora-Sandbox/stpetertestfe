@@ -1,0 +1,18 @@
+# Normalise line endings on the way into git, and check every text file out
+# with LF regardless of platform.
+#
+# Without this a Windows clone gets CRLF from core.autocrlf, and any tool that
+# reads the file expecting LF disagrees with the working copy while CI, which
+# runs on Linux, never sees it. That is the worst shape of disagreement: green
+# in CI and red locally, so a developer trying to reproduce a passing build
+# cannot.
+* text=auto eol=lf
+
+# Binary files must not be touched by the rules above.
+*.png binary
+*.jpg binary
+*.ico binary
+*.gif binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
